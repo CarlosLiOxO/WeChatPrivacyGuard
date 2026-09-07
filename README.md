@@ -9,9 +9,9 @@
   </p>
 
   <p>
-    <a href="https://github.com/CarlosLiOxO/WeChatPrivacyGuard/releases/download/v1.3.1/WeChatPrivacyGuard-1.3.1.dmg"><strong>下载最新版</strong></a>
+    <a href="https://github.com/CarlosLiOxO/WeChatPrivacyGuard/releases/download/v1.4.0-rc1/WeChatPrivacyGuard-1.4.0-rc1.dmg"><strong>下载 1.4.0 RC1</strong></a>
     &nbsp;&nbsp;·&nbsp;&nbsp;
-    <a href="#技术实现">查看源码</a>
+    <a href="https://github.com/CarlosLiOxO/WeChatPrivacyGuard/releases/download/v1.3.1/WeChatPrivacyGuard-1.3.1.dmg">稳定版 v1.3.1</a>
   </p>
 
   <p>本机处理&nbsp;&nbsp;·&nbsp;&nbsp;不存照片&nbsp;&nbsp;·&nbsp;&nbsp;不上传&nbsp;&nbsp;·&nbsp;&nbsp;macOS 13+</p>
@@ -43,11 +43,11 @@
 
 ## 三步开始
 
-1. [下载微信隐私守卫 v1.3.1](https://github.com/CarlosLiOxO/WeChatPrivacyGuard/releases/download/v1.3.1/WeChatPrivacyGuard-1.3.1.dmg)。
+1. [下载微信隐私守卫 1.4.0 RC1](https://github.com/CarlosLiOxO/WeChatPrivacyGuard/releases/download/v1.4.0-rc1/WeChatPrivacyGuard-1.4.0-rc1.dmg)。
 2. 打开 DMG，把“微信隐私守卫”拖入“应用程序”。
 3. 首次启动时允许摄像头权限，然后从菜单栏选择保护方式、距离和速度。
 
-当前安装包使用本机临时签名，尚未经过 Apple Developer ID 公证。如果 macOS 阻止首次打开，请在“应用程序”中右键点击“微信隐私守卫”，选择“打开”，再确认一次。
+1.4.0 RC1 是供提前体验的候选版本，当前仅支持 Apple 芯片 Mac。稳定使用可继续选择 v1.3.1。当前安装包使用本机临时签名，尚未经过 Apple Developer ID 公证；如果 macOS 阻止首次打开，请按 DMG 内的图文指南放行。
 
 ## 你的画面留在你的 Mac
 
@@ -62,7 +62,7 @@
 
 ## 当前能力
 
-v1.3.1 安装包提供第二人判断；仓库中的当前源码还包含可选的本人识别与智能节能。
+1.4.0 RC1 增加可选的本人识别与智能节能；v1.3.1 仍作为稳定版保留。
 
 - 第二人风险判断：结合人脸大小与朝向，不把画面里所有远处人脸一概视为风险。
 - 本人识别（可选）：录入本人后，在画面中出现其他人时触发保护。

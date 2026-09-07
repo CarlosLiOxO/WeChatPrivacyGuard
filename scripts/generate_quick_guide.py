@@ -321,7 +321,7 @@ def build():
         c.circle(57, ty + 3, 3.5, fill=1, stroke=0)
         text(c, 69, ty, tip, 10.5, MUTED)
 
-    text(c, width - 42, 42, "v1.4.0", 9.5, BLUE_DARK, "right")
+    text(c, width - 42, 42, "v1.4.0 RC1", 9.5, BLUE_DARK, "right")
     c.showPage()
 
     c.setFillColor(BG)
@@ -415,7 +415,7 @@ def build():
     text(c, 67, 83.5, "!", 13, WARNING, "center")
     text(c, 91, 98, "放行前先确认下载来源", 11.5, INK)
     text(c, 91, 77, "本版本已完成本地测试与完整性校验。", 9.3, MUTED)
-    text(c, width - 42, 28, "v1.4.0 · 完成 Apple 公证后将移除此步骤", 8.8, BLUE_DARK, "right")
+    text(c, width - 42, 28, "v1.4.0 RC1 · 完成 Apple 公证后将移除此步骤", 8.8, BLUE_DARK, "right")
     c.showPage()
     c.save()
     print(OUTPUT)

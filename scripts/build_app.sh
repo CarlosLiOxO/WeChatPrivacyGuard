@@ -3,9 +3,9 @@ set -euo pipefail
 
 PROJECT_DIR="${0:A:h:h}"
 OUTPUT_DIR="$PROJECT_DIR/outputs"
-APP_PATH="$OUTPUT_DIR/微信隐私守卫-1.4.0.app"
-DMG_PATH="$OUTPUT_DIR/微信隐私守卫-1.4.0.dmg"
-ZIP_PATH="$OUTPUT_DIR/微信隐私守卫-1.4.0.zip"
+APP_PATH="$OUTPUT_DIR/微信隐私守卫-1.4.0-rc1.app"
+DMG_PATH="$OUTPUT_DIR/微信隐私守卫-1.4.0-rc1.dmg"
+ZIP_PATH="$OUTPUT_DIR/微信隐私守卫-1.4.0-rc1.zip"
 GUIDE_PATH="$OUTPUT_DIR/快速使用指南.pdf"
 BACKGROUND_PATH="$PROJECT_DIR/Packaging/DMGBackground.png"
 LAYOUT_PATH="$PROJECT_DIR/Packaging/DMGLayout.dsstore"
