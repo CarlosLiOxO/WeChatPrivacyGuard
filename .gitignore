@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Build outputs
+/outputs/
+/work/
+/tmp/
+*.dmg
+*.zip
+*.app
+
+# Xcode and compiler caches
+DerivedData/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

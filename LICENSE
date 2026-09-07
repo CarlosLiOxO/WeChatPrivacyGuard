@@ -1,0 +1,65 @@
+WECHAT PRIVACY GUARD PROPRIETARY SOURCE-AVAILABLE LICENSE
+Version 1.0, September 2026
+
+Copyright (c) 2026 李翰铭. All rights reserved.
+
+1. Ownership
+
+All copyright, title, interest, and other intellectual property rights in the
+software, source code, object code, artwork, icons, documentation, and other
+original materials contained in this repository (collectively, the
+"Software") are and remain the exclusive property of 李翰铭 (the "Owner"),
+except for third-party materials expressly identified as such.
+
+2. Limited Permission to View
+
+The Owner permits you to access and view the publicly available source code
+solely for personal evaluation and security review. This permission does not
+grant any right to use the Software in production or to copy, modify, adapt,
+translate, reproduce, publish, distribute, sublicense, sell, rent, host,
+commercialize, or create derivative works from the Software.
+
+3. No Implied License
+
+No patent, trademark, trade name, design, publicity, database, or other right
+is granted by implication, estoppel, or otherwise. Any use beyond Section 2
+requires the Owner's prior written permission and may be subject to a separate
+commercial license.
+
+4. GitHub Platform Rights
+
+This License does not restrict the limited rights necessary for GitHub to host
+this repository or the rights that users receive solely through GitHub's Terms
+of Service for viewing and forking a public repository within GitHub. Such
+platform rights do not grant permission to use, modify, distribute, deploy, or
+commercialize the Software outside those terms.
+
+5. Contributions
+
+Unsolicited contributions are not accepted. No pull request, patch, issue
+attachment, or other submission transfers ownership to the Owner or grants the
+submitter permission to use the Software. Contributions may be incorporated
+only under a separate written agreement that expressly assigns or licenses all
+necessary rights to the Owner.
+
+6. Trademarks and Product Identity
+
+The product names "微信隐私守卫" and "WeChatPrivacyGuard", their associated
+logos, icons, and visual identity may not be used to endorse or promote any
+product or service without the Owner's prior written permission.
+
+7. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT
+PERMITTED BY LAW, THE OWNER SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY ARISING FROM OR RELATED TO THE SOFTWARE OR ITS USE.
+
+8. Enforcement and Termination
+
+Any permission granted under this License terminates automatically upon breach.
+The Owner reserves all remedies available under applicable law. If any
+provision is unenforceable, the remaining provisions remain effective.
+
+For licensing inquiries, contact the Owner through this repository.
