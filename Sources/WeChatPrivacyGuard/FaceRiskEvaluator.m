@@ -20,10 +20,17 @@ CGFloat FaceHeightThresholdForProtectionDistance(ProtectionDistance distance) {
 @implementation FaceRiskObservation
 
 - (instancetype)initWithBoundingBox:(CGRect)boundingBox yaw:(NSNumber *)yaw {
+    return [self initWithBoundingBox:boundingBox yaw:yaw captureQuality:nil];
+}
+
+- (instancetype)initWithBoundingBox:(CGRect)boundingBox
+                                yaw:(NSNumber *)yaw
+                     captureQuality:(NSNumber *)captureQuality {
     self = [super init];
     if (self) {
         _boundingBox = boundingBox;
         _yaw = yaw;
+        _captureQuality = captureQuality;
     }
     return self;
 }

@@ -1,11 +1,17 @@
 #import "AppDelegate.h"
 #import "ApplicationCatalog.h"
 #import "ApplicationVisibilityController.h"
+#import "EnergyStateCoordinator.h"
 #import "FaceRiskEvaluator.h"
+#import "FaceJudgementModeStore.h"
+#import "OwnerAwareFaceCoordinator.h"
+#import "OwnerFaceEnrollmentWindowController.h"
+#import "OwnerFaceProfileStore.h"
 #import "PresenceDebouncer.h"
 #import "ProtectionActionCoordinator.h"
 #import "ProtectionModeStore.h"
 #import "ProtectedApplicationStore.h"
+#import "ProtectedWindowActivityMonitor.h"
 #import "WindowPrivacyOverlayController.h"
 #import <ServiceManagement/ServiceManagement.h>
 
@@ -44,6 +50,13 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
 @property(nonatomic, strong) ProtectionActionCoordinator *protectionCoordinator;
 @property(nonatomic) ProtectionMode protectionMode;
 @property(nonatomic, strong) NSMenu *protectionModeMenu;
+@property(nonatomic, strong) FaceJudgementModeStore *faceJudgementModeStore;
+@property(nonatomic) FaceJudgementMode faceJudgementMode;
+@property(nonatomic, strong) NSMenu *faceJudgementModeMenu;
+@property(nonatomic, strong) OwnerFaceProfileStore *ownerFaceProfileStore;
+@property(nonatomic, strong, nullable) OwnerFaceProfile *ownerFaceProfile;
+@property(nonatomic, strong, nullable) OwnerAwareFaceCoordinator *ownerAwareCoordinator;
+@property(nonatomic, strong, nullable) OwnerFaceEnrollmentWindowController *enrollmentController;
 @property(nonatomic, strong) NSMenuItem *clearOverlayItem;
 @property(nonatomic, copy, nullable) NSString *protectionActionStatus;
 @property(nonatomic) BOOL protectionEnabled;
@@ -57,6 +70,11 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
 @property(nonatomic, strong, nullable) ProtectedApplication *selectedExtraApplication;
 @property(nonatomic, copy) NSArray<ProtectedApplication *> *installedApplications;
 @property(nonatomic) BOOL applicationScanInProgress;
+@property(nonatomic, strong) ProtectedWindowActivityMonitor *windowActivityMonitor;
+@property(nonatomic, strong) EnergyStateCoordinator *energyStateCoordinator;
+@property(nonatomic) BOOL systemAwake;
+@property(nonatomic) BOOL screenUnlocked;
+@property(nonatomic) BOOL cameraRequestedToRun;
 @end
 
 @implementation AppDelegate
@@ -82,6 +100,15 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
         initWithUserDefaults:NSUserDefaults.standardUserDefaults];
     self.protectionModeStore = [[ProtectionModeStore alloc] initWithUserDefaults:defaults];
     self.protectionMode = self.protectionModeStore.protectionMode;
+    self.faceJudgementModeStore = [[FaceJudgementModeStore alloc] initWithUserDefaults:defaults];
+    self.ownerFaceProfileStore = [[OwnerFaceProfileStore alloc]
+        initWithKeychainClient:[[SystemOwnerFaceKeychainClient alloc] init]];
+    self.ownerFaceProfile = [self.ownerFaceProfileStore loadProfileAndReturnError:nil];
+    self.faceJudgementMode = self.faceJudgementModeStore.faceJudgementMode;
+    if (self.faceJudgementMode == FaceJudgementModeUnknownPerson && !self.ownerFaceProfile) {
+        self.faceJudgementMode = FaceJudgementModeSecondPerson;
+        [self.faceJudgementModeStore saveFaceJudgementMode:self.faceJudgementMode];
+    }
     WindowPrivacyOverlayController *overlayController = [[WindowPrivacyOverlayController alloc] init];
     self.protectionCoordinator = [[ProtectionActionCoordinator alloc]
         initWithOverlayController:overlayController hideHandler:^BOOL(NSString *bundleIdentifier) {
@@ -104,19 +131,112 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     NSNumber *storedProtection = [NSUserDefaults.standardUserDefaults objectForKey:@"protectionEnabled"];
     self.protectionEnabled = storedProtection ? storedProtection.boolValue : YES;
     [self configureStatusItem];
+    if (self.faceJudgementMode == FaceJudgementModeUnknownPerson) {
+        [self activateUnknownPersonModeShowingErrors:YES];
+    }
     [self configureDefaultLoginItemIfNeeded];
     [self refreshApplicationCatalog:nil];
-
-    if (self.protectionEnabled) {
-        [self.cameraService start];
-    } else {
-        [self updateInterfaceForState:CameraServiceStateStopped message:nil];
-    }
+    [self configureEnergyManagement];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
+    [self.windowActivityMonitor stopMonitoring];
+    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
+    [NSDistributedNotificationCenter.defaultCenter removeObserver:self];
     [self.protectionCoordinator stop];
     [self.cameraService stop];
+}
+
+- (void)configureEnergyManagement {
+    self.systemAwake = YES;
+    self.screenUnlocked = YES;
+    self.energyStateCoordinator = [[EnergyStateCoordinator alloc] init];
+    self.windowActivityMonitor = [[ProtectedWindowActivityMonitor alloc]
+        initWithProtectedBundleIdentifiers:[self protectedBundleIdentifiers]];
+    __weak typeof(self) weakSelf = self;
+    self.windowActivityMonitor.visibilityDidChange = ^(ProtectedWindowVisibility visibility) {
+        (void)visibility;
+        [weakSelf reevaluateEnergyState];
+    };
+
+    NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+    [workspaceCenter addObserver:self selector:@selector(systemWillPause:)
+                            name:NSWorkspaceWillSleepNotification object:nil];
+    [workspaceCenter addObserver:self selector:@selector(systemDidResume:)
+                            name:NSWorkspaceDidWakeNotification object:nil];
+    [workspaceCenter addObserver:self selector:@selector(systemWillPause:)
+                            name:NSWorkspaceScreensDidSleepNotification object:nil];
+    [workspaceCenter addObserver:self selector:@selector(systemDidResume:)
+                            name:NSWorkspaceScreensDidWakeNotification object:nil];
+
+    NSDistributedNotificationCenter *distributedCenter = NSDistributedNotificationCenter.defaultCenter;
+    [distributedCenter addObserver:self selector:@selector(screenDidLock:)
+                              name:@"com.apple.screenIsLocked" object:nil
+                suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+    [distributedCenter addObserver:self selector:@selector(screenDidUnlock:)
+                              name:@"com.apple.screenIsUnlocked" object:nil
+                suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+
+    [self.windowActivityMonitor checkNow];
+    [self reevaluateEnergyState];
+}
+
+- (void)systemWillPause:(NSNotification *)notification {
+    (void)notification;
+    self.systemAwake = NO;
+    [self reevaluateEnergyState];
+}
+
+- (void)systemDidResume:(NSNotification *)notification {
+    (void)notification;
+    self.systemAwake = YES;
+    [self.windowActivityMonitor checkNow];
+    [self reevaluateEnergyState];
+}
+
+- (void)screenDidLock:(NSNotification *)notification {
+    (void)notification;
+    self.screenUnlocked = NO;
+    [self reevaluateEnergyState];
+}
+
+- (void)screenDidUnlock:(NSNotification *)notification {
+    (void)notification;
+    self.screenUnlocked = YES;
+    [self.windowActivityMonitor checkNow];
+    [self reevaluateEnergyState];
+}
+
+- (void)reevaluateEnergyState {
+    if (!self.energyStateCoordinator || !self.windowActivityMonitor) return;
+    [self.energyStateCoordinator
+        updateWithProtectionEnabled:self.protectionEnabled
+        systemAvailable:(self.systemAwake && self.screenUnlocked)
+        enrollmentActive:self.enrollmentController != nil
+        windowVisibility:self.windowActivityMonitor.currentVisibility];
+
+    NSTimeInterval monitoringInterval = self.energyStateCoordinator.windowMonitoringInterval;
+    if (monitoringInterval > 0) {
+        [self.windowActivityMonitor startMonitoringWithInterval:monitoringInterval];
+    } else {
+        [self.windowActivityMonitor stopMonitoring];
+    }
+
+    BOOL shouldRun = self.energyStateCoordinator.cameraShouldRun;
+    if (shouldRun != self.cameraRequestedToRun) {
+        self.cameraRequestedToRun = shouldRun;
+        if (shouldRun) {
+            [self.cameraService start];
+        } else {
+            [self.debouncer reset];
+            [self.ownerAwareCoordinator reset];
+            [self.protectionCoordinator stop];
+            [self.cameraService stop];
+        }
+    } else if (shouldRun && self.cameraState == CameraServiceStateStopped) {
+        [self.cameraService start];
+    }
+    [self updateInterfaceForState:self.cameraState message:nil];
 }
 
 - (void)configureStatusItem {
@@ -164,6 +284,14 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     modeItem.submenu = self.protectionModeMenu;
     [menu addItem:modeItem];
     [self rebuildProtectionModeMenu];
+
+    NSMenuItem *judgementItem = [[NSMenuItem alloc] initWithTitle:@"判断方式"
+                                                          action:nil
+                                                   keyEquivalent:@""];
+    self.faceJudgementModeMenu = [[NSMenu alloc] initWithTitle:@"判断方式"];
+    judgementItem.submenu = self.faceJudgementModeMenu;
+    [menu addItem:judgementItem];
+    [self rebuildFaceJudgementModeMenu];
 
     self.clearOverlayItem = [[NSMenuItem alloc] initWithTitle:@"立即解除遮罩"
                                                         action:@selector(clearPrivacyOverlay:)
@@ -232,11 +360,11 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     self.toggleProtectionItem.state = self.protectionEnabled ? NSControlStateValueOn : NSControlStateValueOff;
     [self.debouncer reset];
     if (self.protectionEnabled) {
-        [self.cameraService start];
+        [self.windowActivityMonitor checkNow];
     } else {
         [self.protectionCoordinator stop];
-        [self.cameraService stop];
     }
+    [self reevaluateEnergyState];
 }
 
 - (void)testProtection:(id)sender {
@@ -370,6 +498,8 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     self.selectedExtraApplication = application;
     [self.applicationStore saveApplication:application];
     [self.protectionCoordinator updateBundleIdentifiers:[self protectedBundleIdentifiers]];
+    [self.windowActivityMonitor updateProtectedBundleIdentifiers:[self protectedBundleIdentifiers]];
+    [self reevaluateEnergyState];
     [self rebuildExtraApplicationMenu];
 }
 
@@ -377,6 +507,8 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     self.selectedExtraApplication = nil;
     [self.applicationStore clear];
     [self.protectionCoordinator updateBundleIdentifiers:[self protectedBundleIdentifiers]];
+    [self.windowActivityMonitor updateProtectedBundleIdentifiers:[self protectedBundleIdentifiers]];
+    [self reevaluateEnergyState];
     [self rebuildExtraApplicationMenu];
 }
 
@@ -415,6 +547,153 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     self.protectionCoordinator.protectionMode = self.protectionMode;
     [self.debouncer reset];
     [self rebuildProtectionModeMenu];
+}
+
+- (void)rebuildFaceJudgementModeMenu {
+    if (!self.faceJudgementModeMenu) return;
+    [self.faceJudgementModeMenu removeAllItems];
+    NSArray<NSDictionary *> *options = @[
+        @{@"title": @"第二人判断", @"value": @(FaceJudgementModeSecondPerson)},
+        @{@"title": @"陌生人判断", @"value": @(FaceJudgementModeUnknownPerson)},
+    ];
+    for (NSDictionary *option in options) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:option[@"title"]
+                                                      action:@selector(selectFaceJudgementMode:)
+                                               keyEquivalent:@""];
+        item.target = self;
+        item.representedObject = option[@"value"];
+        item.state = [option[@"value"] integerValue] == self.faceJudgementMode
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        [self.faceJudgementModeMenu addItem:item];
+    }
+    [self.faceJudgementModeMenu addItem:NSMenuItem.separatorItem];
+    NSMenuItem *enroll = [[NSMenuItem alloc]
+        initWithTitle:(self.ownerFaceProfile ? @"重新录入本人面容…" : @"录入本人面容…")
+               action:@selector(beginOwnerFaceEnrollment:) keyEquivalent:@""];
+    enroll.target = self;
+    [self.faceJudgementModeMenu addItem:enroll];
+    NSMenuItem *delete = [[NSMenuItem alloc] initWithTitle:@"删除本人面容"
+                                                    action:@selector(deleteOwnerFaceProfile:)
+                                             keyEquivalent:@""];
+    delete.target = self;
+    delete.enabled = self.ownerFaceProfile != nil;
+    [self.faceJudgementModeMenu addItem:delete];
+}
+
+- (void)selectFaceJudgementMode:(NSMenuItem *)sender {
+    FaceJudgementMode requested = [sender.representedObject integerValue] == FaceJudgementModeUnknownPerson
+        ? FaceJudgementModeUnknownPerson : FaceJudgementModeSecondPerson;
+    if (requested == FaceJudgementModeUnknownPerson && !self.ownerFaceProfile) {
+        [self beginOwnerFaceEnrollment:nil];
+        return;
+    }
+    if (requested == FaceJudgementModeUnknownPerson) {
+        [self activateUnknownPersonModeShowingErrors:YES];
+    } else {
+        [self activateSecondPersonMode];
+    }
+}
+
+- (NSURL *)faceEmbeddingModelURL {
+    return [NSBundle.mainBundle URLForResource:@"MobileFaceEmbedding" withExtension:@"mlpackage"];
+}
+
+- (BOOL)activateUnknownPersonModeShowingErrors:(BOOL)showErrors {
+    if (!self.ownerFaceProfile) return NO;
+    NSURL *modelURL = [self faceEmbeddingModelURL];
+    NSError *error = nil;
+    OwnerAwareFaceCoordinator *coordinator = modelURL
+        ? [[OwnerAwareFaceCoordinator alloc] initWithProfile:self.ownerFaceProfile
+                                                   modelURL:modelURL
+                                         protectionDistance:self.protectionDistance
+                                                      error:&error] : nil;
+    if (!coordinator) {
+        [self activateSecondPersonMode];
+        if (showErrors) [self showAlertWithTitle:@"无法启用陌生人判断"
+                                         message:error.localizedDescription ?: @"人脸模型资源缺失"];
+        return NO;
+    }
+    self.ownerAwareCoordinator = coordinator;
+    self.faceJudgementMode = FaceJudgementModeUnknownPerson;
+    [self.faceJudgementModeStore saveFaceJudgementMode:self.faceJudgementMode];
+    self.cameraService.identityAnalysisEnabled = YES;
+    [self.debouncer reset];
+    [self rebuildFaceJudgementModeMenu];
+    return YES;
+}
+
+- (void)activateSecondPersonMode {
+    [self.ownerAwareCoordinator reset];
+    self.ownerAwareCoordinator = nil;
+    self.faceJudgementMode = FaceJudgementModeSecondPerson;
+    [self.faceJudgementModeStore saveFaceJudgementMode:self.faceJudgementMode];
+    self.cameraService.identityAnalysisEnabled = self.enrollmentController != nil;
+    [self.debouncer reset];
+    [self rebuildFaceJudgementModeMenu];
+}
+
+- (void)beginOwnerFaceEnrollment:(id)sender {
+    if (self.enrollmentController) return;
+    NSURL *modelURL = [self faceEmbeddingModelURL];
+    NSError *error = nil;
+    OwnerFaceEnrollmentWindowController *controller = modelURL
+        ? [[OwnerFaceEnrollmentWindowController alloc] initWithModelURL:modelURL error:&error] : nil;
+    if (!controller) {
+        [self showAlertWithTitle:@"无法开始面容录入"
+                         message:error.localizedDescription ?: @"人脸模型资源缺失"];
+        return;
+    }
+    self.enrollmentController = controller;
+    controller.cameraPreviewLayer = [self.cameraService makeEnrollmentPreviewLayer];
+    self.cameraService.identityAnalysisEnabled = YES;
+    if (!self.protectionEnabled) {
+        self.protectionEnabled = YES;
+        [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"protectionEnabled"];
+        self.toggleProtectionItem.state = NSControlStateValueOn;
+    }
+    [self reevaluateEnergyState];
+    __weak typeof(self) weakSelf = self;
+    controller.completionHandler = ^(OwnerFaceProfile *profile) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        NSError *saveError = nil;
+        if (![self.ownerFaceProfileStore saveProfile:profile error:&saveError]) {
+            [self showAlertWithTitle:@"本人面容保存失败" message:saveError.localizedDescription];
+            self.enrollmentController = nil;
+            [self activateSecondPersonMode];
+            [self reevaluateEnergyState];
+            return;
+        }
+        self.ownerFaceProfile = profile;
+        self.enrollmentController = nil;
+        [self activateUnknownPersonModeShowingErrors:YES];
+        [self reevaluateEnergyState];
+    };
+    controller.cancellationHandler = ^{
+        __strong typeof(weakSelf) self = weakSelf;
+        self.enrollmentController = nil;
+        self.cameraService.identityAnalysisEnabled =
+            self.faceJudgementMode == FaceJudgementModeUnknownPerson;
+        [self reevaluateEnergyState];
+    };
+    [controller beginEnrollment];
+}
+
+- (void)deleteOwnerFaceProfile:(id)sender {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"删除本人面容？";
+    alert.informativeText = @"只会删除这台 Mac 钥匙串中的特征模板，并自动切回第二人判断。";
+    [alert addButtonWithTitle:@"删除"];
+    [alert addButtonWithTitle:@"取消"];
+    [NSApp activateIgnoringOtherApps:YES];
+    if ([alert runModal] != NSAlertFirstButtonReturn) return;
+    NSError *error = nil;
+    if (![self.ownerFaceProfileStore deleteProfileAndReturnError:&error]) {
+        [self showAlertWithTitle:@"删除失败" message:error.localizedDescription];
+        return;
+    }
+    self.ownerFaceProfile = nil;
+    [self activateSecondPersonMode];
 }
 
 - (void)rebuildProtectionDistanceMenu {
@@ -460,6 +739,7 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
     if (![value isKindOfClass:NSNumber.class]) return;
     self.protectionDistance = value.integerValue;
     self.riskEvaluator.protectionDistance = self.protectionDistance;
+    self.ownerAwareCoordinator.protectionDistance = self.protectionDistance;
     [NSUserDefaults.standardUserDefaults setInteger:self.protectionDistance
                                              forKey:ProtectionDistanceDefaultsKey];
     [self.debouncer reset];
@@ -503,8 +783,13 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
               message:(NSString *)message {
     self.cameraState = state;
     if (state == CameraServiceStatePermissionDenied || state == CameraServiceStateUnavailable ||
-        state == CameraServiceStateFailed || (state == CameraServiceStateStopped && !self.protectionEnabled)) {
+        state == CameraServiceStateFailed ||
+        (state == CameraServiceStateStopped && !self.energyStateCoordinator.cameraShouldRun)) {
         [self.protectionCoordinator stop];
+        [self.ownerAwareCoordinator reset];
+    }
+    if (state == CameraServiceStateStopped && self.energyStateCoordinator.cameraShouldRun) {
+        [self.cameraService start];
     }
     [self updateInterfaceForState:state message:message];
 }
@@ -512,12 +797,27 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
 - (void)cameraService:(CameraService *)service
  didDetectObservations:(NSArray<FaceRiskObservation *> *)observations {
     if (!self.protectionEnabled || self.cameraState != CameraServiceStateRunning) return;
+    if (self.enrollmentController || self.faceJudgementMode == FaceJudgementModeUnknownPerson) return;
     FaceRiskState riskState = [self.riskEvaluator evaluateObservations:observations];
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     BOOL didTrigger = [self.debouncer recordRiskState:riskState atTime:now];
     [self.protectionCoordinator handleRiskState:riskState
                                      didTrigger:didTrigger
                                           atTime:now
+                               bundleIdentifiers:[self protectedBundleIdentifiers]];
+}
+
+- (void)cameraService:(CameraService *)service didAnalyzeFrame:(FaceAnalysisFrame *)frame {
+    if (self.enrollmentController) {
+        [self.enrollmentController consumeFrame:frame];
+        return;
+    }
+    if (!self.protectionEnabled || self.cameraState != CameraServiceStateRunning ||
+        self.faceJudgementMode != FaceJudgementModeUnknownPerson || !self.ownerAwareCoordinator) return;
+    FaceRiskState riskState = [self.ownerAwareCoordinator evaluateFrame:frame];
+    BOOL didTrigger = [self.debouncer recordRiskState:riskState atTime:frame.timestamp];
+    [self.protectionCoordinator handleRiskState:riskState didTrigger:didTrigger
+                                          atTime:frame.timestamp
                                bundleIdentifiers:[self protectedBundleIdentifiers]];
 }
 
@@ -535,6 +835,7 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
         case CameraServiceStateRunning:
             symbolName = @"eye";
             statusText = @"保护中";
+            if (self.faceJudgementMode == FaceJudgementModeUnknownPerson) statusText = @"保护中 · 陌生人判断";
             break;
         case CameraServiceStatePermissionDenied:
             symbolName = @"exclamationmark.triangle";
@@ -545,6 +846,20 @@ static NSTimeInterval RequiredDurationForResponseSpeed(ResponseSpeed speed) {
             symbolName = @"exclamationmark.triangle";
             statusText = [NSString stringWithFormat:@"保护未生效：%@", message ?: @"未知错误"];
             break;
+    }
+    if (self.energyStateCoordinator && self.energyStateCoordinator.state == EnergyStateNoVisibleWindows) {
+        symbolName = @"leaf";
+        statusText = self.energyStateCoordinator.statusText;
+    } else if (self.energyStateCoordinator && self.energyStateCoordinator.state == EnergyStateSystemPaused) {
+        symbolName = @"lock";
+        statusText = self.energyStateCoordinator.statusText;
+    } else if (self.energyStateCoordinator && self.energyStateCoordinator.state == EnergyStateDisabled) {
+        symbolName = @"eye.slash";
+        statusText = self.energyStateCoordinator.statusText;
+    } else if (self.energyStateCoordinator && self.energyStateCoordinator.state == EnergyStateEnrollment &&
+               state != CameraServiceStatePermissionDenied && state != CameraServiceStateFailed) {
+        symbolName = @"camera";
+        statusText = self.energyStateCoordinator.statusText;
     }
     if (self.protectionActionStatus.length > 0) {
         statusText = self.protectionActionStatus;

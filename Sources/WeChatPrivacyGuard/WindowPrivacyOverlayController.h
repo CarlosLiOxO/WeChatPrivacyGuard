@@ -36,6 +36,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)updateBundleIdentifiers:(NSSet<NSString *> *)bundleIdentifiers;
 - (void)deactivateAnimated:(BOOL)animated;
 - (void)refreshNow;
+- (void)temporarilyRevealBundleIdentifier:(NSString *)bundleIdentifier;
+- (BOOL)isBundleIdentifierTemporarilyRevealed:(NSString *)bundleIdentifier;
 
 @end
 

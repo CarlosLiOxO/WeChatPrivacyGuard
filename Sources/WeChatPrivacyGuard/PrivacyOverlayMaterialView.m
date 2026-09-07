@@ -9,6 +9,34 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
     return reduceTransparency || !visualEffectAvailable;
 }
 
+PrivacyOverlayAppearanceStyle PrivacyOverlayAppearanceStyleForAppearance(NSAppearance *appearance) {
+    NSString *match = [appearance bestMatchFromAppearancesWithNames:@[
+        NSAppearanceNameDarkAqua,
+        NSAppearanceNameAqua,
+    ]];
+    return [match isEqualToString:NSAppearanceNameDarkAqua]
+        ? PrivacyOverlayAppearanceStyleDark : PrivacyOverlayAppearanceStyleLight;
+}
+
+BOOL PrivacyOverlayShowsTemporaryRevealButton(NSSize size) {
+    return PrivacyOverlayLayoutModeForSize(size) == PrivacyOverlayLayoutModeRegular;
+}
+
+BOOL PrivacyOverlayRevealButtonAcceptsFirstMouse(void) {
+    return YES;
+}
+
+@interface PrivacyOverlayRevealButton : NSButton
+@end
+
+
+@implementation PrivacyOverlayRevealButton
+- (BOOL)acceptsFirstMouse:(NSEvent *)event {
+    (void)event;
+    return PrivacyOverlayRevealButtonAcceptsFirstMouse();
+}
+@end
+
 @interface PrivacyOverlayDecorationView : NSView
 @property(nonatomic) BOOL opaqueFallback;
 @end
@@ -27,20 +55,29 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
 
 - (void)drawRect:(NSRect)dirtyRect {
     NSRect bounds = self.bounds;
+    BOOL dark = PrivacyOverlayAppearanceStyleForAppearance(self.effectiveAppearance) ==
+        PrivacyOverlayAppearanceStyleDark;
     CGFloat fogAlpha = self.opaqueFallback ? 1.0 : 0.88;
-    [[NSColor colorWithSRGBRed:0.906 green:0.937 blue:0.953 alpha:fogAlpha] setFill];
+    NSColor *fogColor = dark
+        ? [NSColor colorWithSRGBRed:0.075 green:0.105 blue:0.125 alpha:fogAlpha]
+        : [NSColor colorWithSRGBRed:0.906 green:0.937 blue:0.953 alpha:fogAlpha];
+    [fogColor setFill];
     NSRectFill(bounds);
 
     [self drawGlowInRect:NSMakeRect(NSMinX(bounds) - NSWidth(bounds) * 0.18,
                                     NSMaxY(bounds) - NSHeight(bounds) * 0.63,
                                     NSWidth(bounds) * 0.72,
                                     NSHeight(bounds) * 0.78)
-                   color:[NSColor colorWithSRGBRed:0.55 green:0.76 blue:0.83 alpha:0.48]];
+                   color:dark
+        ? [NSColor colorWithSRGBRed:0.20 green:0.49 blue:0.58 alpha:0.33]
+        : [NSColor colorWithSRGBRed:0.55 green:0.76 blue:0.83 alpha:0.48]];
     [self drawGlowInRect:NSMakeRect(NSMaxX(bounds) - NSWidth(bounds) * 0.55,
                                     NSMinY(bounds) - NSHeight(bounds) * 0.20,
                                     NSWidth(bounds) * 0.70,
                                     NSHeight(bounds) * 0.75)
-                   color:[NSColor colorWithSRGBRed:0.53 green:0.76 blue:0.68 alpha:0.42]];
+                   color:dark
+        ? [NSColor colorWithSRGBRed:0.20 green:0.50 blue:0.40 alpha:0.28]
+        : [NSColor colorWithSRGBRed:0.53 green:0.76 blue:0.68 alpha:0.42]];
 
     if (PrivacyOverlayLayoutModeForSize(bounds.size) == PrivacyOverlayLayoutModeCompact) {
         [self drawLensAtPoint:NSMakePoint(NSMidX(bounds), NSMidY(bounds)) scale:0.72];
@@ -49,42 +86,54 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
 
     CGFloat cardWidth = MIN(264, NSWidth(bounds) - 40);
     NSRect cardRect = NSMakeRect(NSMidX(bounds) - cardWidth / 2,
-                                 NSMidY(bounds) - 66,
-                                 cardWidth, 132);
+                                 NSMidY(bounds) - 83,
+                                 cardWidth, 166);
     [NSGraphicsContext saveGraphicsState];
     NSShadow *shadow = [[NSShadow alloc] init];
-    shadow.shadowColor = [NSColor colorWithSRGBRed:0.20 green:0.31 blue:0.37 alpha:0.17];
+    shadow.shadowColor = dark
+        ? [NSColor colorWithWhite:0 alpha:0.42]
+        : [NSColor colorWithSRGBRed:0.20 green:0.31 blue:0.37 alpha:0.17];
     shadow.shadowBlurRadius = 24;
     shadow.shadowOffset = NSMakeSize(0, -9);
     [shadow set];
     NSBezierPath *card = [NSBezierPath bezierPathWithRoundedRect:cardRect xRadius:24 yRadius:24];
-    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.62] setFill];
+    NSColor *cardColor = dark
+        ? [NSColor colorWithSRGBRed:0.14 green:0.18 blue:0.20 alpha:(self.opaqueFallback ? 1 : 0.74)]
+        : [NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:(self.opaqueFallback ? 1 : 0.62)];
+    [cardColor setFill];
     [card fill];
     [NSGraphicsContext restoreGraphicsState];
 
-    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.86] setStroke];
+    NSColor *borderColor = dark
+        ? [NSColor colorWithWhite:1 alpha:0.16]
+        : [NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.86];
+    [borderColor setStroke];
     card.lineWidth = 1;
     [card stroke];
 
-    NSPoint lensCenter = NSMakePoint(NSMidX(cardRect), NSMaxY(cardRect) - 44);
+    NSPoint lensCenter = NSMakePoint(NSMidX(cardRect), NSMaxY(cardRect) - 40);
     [self drawLensAtPoint:lensCenter scale:0.76];
 
     NSDictionary *titleAttributes = @{
         NSFontAttributeName: [NSFont systemFontOfSize:16 weight:NSFontWeightSemibold],
-        NSForegroundColorAttributeName: [NSColor colorWithSRGBRed:0.15 green:0.21 blue:0.25 alpha:1],
+        NSForegroundColorAttributeName: dark
+            ? [NSColor colorWithWhite:0.95 alpha:1]
+            : [NSColor colorWithSRGBRed:0.15 green:0.21 blue:0.25 alpha:1],
     };
     NSString *title = @"窗口已保护";
     NSSize titleSize = [title sizeWithAttributes:titleAttributes];
-    [title drawAtPoint:NSMakePoint(NSMidX(cardRect) - titleSize.width / 2, NSMinY(cardRect) + 35)
+    [title drawAtPoint:NSMakePoint(NSMidX(cardRect) - titleSize.width / 2, NSMinY(cardRect) + 68)
          withAttributes:titleAttributes];
 
     NSDictionary *subtitleAttributes = @{
         NSFontAttributeName: [NSFont systemFontOfSize:11 weight:NSFontWeightRegular],
-        NSForegroundColorAttributeName: [NSColor colorWithSRGBRed:0.37 green:0.46 blue:0.51 alpha:0.82],
+        NSForegroundColorAttributeName: dark
+            ? [NSColor colorWithWhite:0.76 alpha:0.88]
+            : [NSColor colorWithSRGBRed:0.37 green:0.46 blue:0.51 alpha:0.82],
     };
     NSString *subtitle = @"风险解除后自动恢复";
     NSSize subtitleSize = [subtitle sizeWithAttributes:subtitleAttributes];
-    [subtitle drawAtPoint:NSMakePoint(NSMidX(cardRect) - subtitleSize.width / 2, NSMinY(cardRect) + 16)
+    [subtitle drawAtPoint:NSMakePoint(NSMidX(cardRect) - subtitleSize.width / 2, NSMinY(cardRect) + 50)
             withAttributes:subtitleAttributes];
 }
 
@@ -131,6 +180,7 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
 @interface PrivacyOverlayMaterialView ()
 @property(nonatomic, strong, nullable) NSVisualEffectView *visualEffectView;
 @property(nonatomic, strong) PrivacyOverlayDecorationView *decorationView;
+@property(nonatomic, strong) NSButton *temporaryRevealButton;
 @property(nonatomic, readwrite) BOOL usingOpaqueFallback;
 @end
 
@@ -146,7 +196,6 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
             _visualEffectView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
             _visualEffectView.material = NSVisualEffectMaterialUnderWindowBackground;
             _visualEffectView.state = NSVisualEffectStateActive;
-            _visualEffectView.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
             [self addSubview:_visualEffectView];
         } @catch (NSException *exception) {
             _visualEffectView = nil;
@@ -155,6 +204,16 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
         _decorationView = [[PrivacyOverlayDecorationView alloc] initWithFrame:self.bounds];
         _decorationView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         [self addSubview:_decorationView];
+
+        _temporaryRevealButton = [[PrivacyOverlayRevealButton alloc] initWithFrame:NSZeroRect];
+        _temporaryRevealButton.title = @"暂时查看";
+        _temporaryRevealButton.target = self;
+        _temporaryRevealButton.action = @selector(temporaryRevealButtonPressed:);
+        _temporaryRevealButton.bezelStyle = NSBezelStyleRounded;
+        _temporaryRevealButton.controlSize = NSControlSizeSmall;
+        _temporaryRevealButton.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+        _temporaryRevealButton.accessibilityLabel = @"暂时查看此应用";
+        [self addSubview:_temporaryRevealButton];
         self.accessibilityLabel = @"隐私保护遮罩";
         [self refreshAccessibilityAppearance];
 
@@ -165,6 +224,30 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
                  object:nil];
     }
     return self;
+}
+
+- (void)layout {
+    [super layout];
+    BOOL showButton = PrivacyOverlayShowsTemporaryRevealButton(self.bounds.size);
+    self.temporaryRevealButton.hidden = !showButton;
+    if (!showButton) return;
+    CGFloat buttonWidth = 92;
+    CGFloat buttonHeight = 28;
+    CGFloat cardBottom = NSMidY(self.bounds) - 83;
+    self.temporaryRevealButton.frame = NSMakeRect(
+        NSMidX(self.bounds) - buttonWidth / 2,
+        cardBottom + 14,
+        buttonWidth,
+        buttonHeight);
+}
+
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self.decorationView setNeedsDisplay:YES];
+}
+
+- (void)temporaryRevealButtonPressed:(id)sender {
+    if (self.temporaryRevealHandler) self.temporaryRevealHandler();
 }
 
 - (void)dealloc {
@@ -181,6 +264,7 @@ BOOL PrivacyOverlayUsesOpaqueFallback(BOOL reduceTransparency, BOOL visualEffect
         reduceTransparency, self.visualEffectView != nil);
     self.visualEffectView.hidden = self.usingOpaqueFallback;
     self.decorationView.opaqueFallback = self.usingOpaqueFallback;
+    [self.decorationView setNeedsDisplay:YES];
     [self setNeedsDisplay:YES];
 }
 

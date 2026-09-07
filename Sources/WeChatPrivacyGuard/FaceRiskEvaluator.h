@@ -21,8 +21,12 @@ FOUNDATION_EXPORT CGFloat FaceHeightThresholdForProtectionDistance(ProtectionDis
 
 @property(nonatomic, readonly) CGRect boundingBox;
 @property(nonatomic, strong, readonly, nullable) NSNumber *yaw;
+@property(nonatomic, strong, readonly, nullable) NSNumber *captureQuality;
 
 - (instancetype)initWithBoundingBox:(CGRect)boundingBox yaw:(nullable NSNumber *)yaw;
+- (instancetype)initWithBoundingBox:(CGRect)boundingBox
+                                yaw:(nullable NSNumber *)yaw
+                     captureQuality:(nullable NSNumber *)captureQuality;
 
 @end
 

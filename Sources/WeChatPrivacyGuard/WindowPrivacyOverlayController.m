@@ -73,6 +73,7 @@
 @property(nonatomic, copy) NSSet<NSString *> *bundleIdentifiers;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, PrivacyOverlayEntry *> *entries;
 @property(nonatomic, strong) NSMutableSet<NSString *> *failedBundleIdentifiers;
+@property(nonatomic, strong) NSMutableSet<NSString *> *temporarilyRevealedBundleIdentifiers;
 @property(nonatomic, strong, nullable) NSTimer *refreshTimer;
 @property(nonatomic) BOOL active;
 @end
@@ -85,6 +86,7 @@
         _bundleIdentifiers = [NSSet set];
         _entries = [NSMutableDictionary dictionary];
         _failedBundleIdentifiers = [NSMutableSet set];
+        _temporarilyRevealedBundleIdentifiers = [NSMutableSet set];
     }
     return self;
 }
@@ -97,6 +99,7 @@
     self.active = YES;
     self.bundleIdentifiers = [bundleIdentifiers copy];
     [self.failedBundleIdentifiers removeAllObjects];
+    [self.temporarilyRevealedBundleIdentifiers removeAllObjects];
     [self refreshNow];
     [self.refreshTimer invalidate];
     __weak typeof(self) weakSelf = self;
@@ -118,6 +121,7 @@
     NSArray<PrivacyOverlayEntry *> *closingEntries = self.entries.allValues.copy;
     [self.entries removeAllObjects];
     [self.failedBundleIdentifiers removeAllObjects];
+    [self.temporarilyRevealedBundleIdentifiers removeAllObjects];
     [self publishOverlayCount];
     for (PrivacyOverlayEntry *entry in closingEntries) {
         PrivacyOverlayPanel *panel = entry.panel;
@@ -148,12 +152,14 @@
     for (ProtectedWindowDescriptor *descriptor in descriptors) {
         NSNumber *key = @(descriptor.windowNumber);
         [visibleWindowNumbers addObject:key];
+        if ([self.temporarilyRevealedBundleIdentifiers containsObject:descriptor.bundleIdentifier]) continue;
         PrivacyOverlayEntry *entry = self.entries[key];
         @try {
             if (!entry) {
                 entry = [[PrivacyOverlayEntry alloc] init];
                 entry.bundleIdentifier = descriptor.bundleIdentifier;
-                entry.panel = [self createPanel];
+                entry.panel = [self createPanelForWindowNumber:descriptor.windowNumber
+                                               bundleIdentifier:descriptor.bundleIdentifier];
                 entry.panel.alphaValue = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion ? 1 : 0;
                 self.entries[key] = entry;
             }
@@ -199,7 +205,8 @@
     return result;
 }
 
-- (PrivacyOverlayPanel *)createPanel {
+- (PrivacyOverlayPanel *)createPanelForWindowNumber:(CGWindowID)windowNumber
+                                    bundleIdentifier:(NSString *)bundleIdentifier {
     PrivacyOverlayPanel *panel = [[PrivacyOverlayPanel alloc]
         initWithContentRect:NSMakeRect(0, 0, 100, 100)
                   styleMask:NSWindowStyleMaskBorderless
@@ -217,8 +224,28 @@
     PrivacyOverlayMaterialView *view = [[PrivacyOverlayMaterialView alloc] initWithFrame:panel.contentView.bounds];
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     view.accessibilityLabel = @"隐私保护遮罩";
+    __weak typeof(self) weakSelf = self;
+    view.temporaryRevealHandler = ^{
+        [weakSelf temporarilyRevealBundleIdentifier:bundleIdentifier];
+    };
     panel.contentView = view;
     return panel;
+}
+
+- (void)temporarilyRevealBundleIdentifier:(NSString *)bundleIdentifier {
+    if (bundleIdentifier.length == 0) return;
+    [self.temporarilyRevealedBundleIdentifiers addObject:bundleIdentifier];
+    for (NSNumber *key in self.entries.allKeys.copy) {
+        PrivacyOverlayEntry *entry = self.entries[key];
+        if (![entry.bundleIdentifier isEqualToString:bundleIdentifier]) continue;
+        [entry.panel close];
+        [self.entries removeObjectForKey:key];
+    }
+    [self publishOverlayCount];
+}
+
+- (BOOL)isBundleIdentifierTemporarilyRevealed:(NSString *)bundleIdentifier {
+    return [self.temporarilyRevealedBundleIdentifiers containsObject:bundleIdentifier];
 }
 
 - (NSRect)appKitFrameFromQuartzBounds:(CGRect)bounds {
